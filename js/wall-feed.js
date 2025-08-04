@@ -696,11 +696,26 @@ window.addEventListener('beforeunload', () => {
     }
 });
 
-// Handle enter key in input
+// Handle enter key in input and URL parameters
 document.addEventListener('DOMContentLoaded', () => {
-    document.getElementById('userPubkey').addEventListener('keypress', (e) => {
+    const pubkeyInput = document.getElementById('userPubkey');
+    
+    // Handle enter key
+    pubkeyInput.addEventListener('keypress', (e) => {
         if (e.key === 'Enter') {
             loadWall();
         }
     });
+    
+    // Check for URL parameters and auto-load
+    const urlParams = new URLSearchParams(window.location.search);
+    const pubkeyParam = urlParams.get('pubkey');
+    
+    if (pubkeyParam) {
+        pubkeyInput.value = pubkeyParam;
+        // Auto-load the wall after a brief delay to ensure everything is initialized
+        setTimeout(() => {
+            loadWall();
+        }, 100);
+    }
 });
