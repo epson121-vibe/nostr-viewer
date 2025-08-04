@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Reactions</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .post {
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 15px;
+            margin: 15px 0;
+        }
+        .post-reactions {
+            display: flex;
+            gap: 8px;
+            margin: 10px 0;
+            flex-wrap: wrap;
+        }
+        .reaction {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            background-color: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 12px;
+            padding: 4px 8px;
+            font-size: 12px;
+        }
+        .reactions-loading {
+            color: #999;
+            font-size: 11px;
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Reaction System Test</h1>
+        <p>Testing the reaction loading system with debugging output.</p>
+        
+        <div class="input-group">
+            <label for="testPubkey">Test Public Key:</label>
+            <input type="text" id="testPubkey" placeholder="Enter a npub or hex public key to test...">
+            <button onclick="testReactions()">Test Reactions</button>
+        </div>
+        
+        <div id="loading" style="display: none;">Loading...</div>
+        <div id="error" style="display: none; color: red;"></div>
+        <div id="testResults"></div>
+    </div>
+
+    <!-- Core utilities -->
+    <script src="js/crypto-utils.js"></script>
+    <script src="js/relay-manager.js"></script>
+    <script src="js/content-renderer.js"></script>
+    
+    <script>
+        let relayManager = null;
+        
+        async function testReactions() {
+            const pubkeyInput = document.getElementById('testPubkey').value.trim();
+            if (!pubkeyInput) {
+                alert('Please enter a public key');
+                return;
+            }
+            
+            console.log('=== REACTION TEST STARTING ===');
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('error').style.display = 'none';
+            document.getElementById('testResults').innerHTML = '';
+            
+            try {
+                const pubkey = CryptoUtils.normalizeKey(pubkeyInput);
+                console.log('Normalized pubkey:', pubkey);
+                
+                // Initialize relay manager
+                relayManager = new RelayManager();
+                await relayManager.connectToRelays();
+                console.log('Connected to relays:', relayManager.getConnectedCount());
+                
+                // Load some posts from this user
+                loadTestPosts(pubkey);
+                
+            } catch (error) {
+                console.error('Test error:', error);
+                document.getElementById('error').textContent = 'Error: ' + error.message;
+                document.getElementById('error').style.display = 'block';
+            }
+            
+            document.getElementById('loading').style.display = 'none';
+        }
+        
+        function loadTestPosts(pubkey) {
+            const postsFilter = {
+                kinds: [1],
+                authors: [pubkey],
+                limit: 5
+            };
+            
+            const testPosts = [];
+            
+            relayManager.subscribe('test_posts', postsFilter, (postEvent, relayUrl) => {
+                console.log(`Found test post from ${relayUrl}:`, postEvent.id.slice(0, 8));
+                
+                if (!testPosts.find(p => p.id === postEvent.id)) {
+                    testPosts.push(postEvent);
+                    displayTestPost(postEvent);
+                    testPostReactions(postEvent.id);
+                }
+            });
+        }
+        
+        function displayTestPost(post) {
+            const resultsDiv = document.getElementById('testResults');
+            
+            const postDiv = document.createElement('div');
+            postDiv.className = 'post';
+            postDiv.innerHTML = `
+                <div><strong>Post ID:</strong> ${post.id.slice(0, 16)}...</div>
+                <div><strong>Content:</strong> ${post.content.slice(0, 100)}...</div>
+                <div><strong>Date:</strong> ${new Date(post.created_at * 1000).toLocaleString()}</div>
+                <div class="post-reactions" id="reactions-${post.id}">
+                    <span class="reactions-loading">Loading reactions...</span>
+                </div>
+            `;
+            
+            resultsDiv.appendChild(postDiv);
+        }
+        
+        function testPostReactions(eventId) {
+            console.log(`=== TESTING REACTIONS FOR ${eventId.slice(0, 8)} ===`);
+            
+            const reactionsFilter = {
+                kinds: [7],
+                '#e': [eventId],
+                limit: 50
+            };
+            
+            const subscriptionId = `test_reactions_${eventId.slice(0, 8)}`;
+            const reactions = [];
+            
+            relayManager.subscribe(subscriptionId, reactionsFilter, (reactionEvent, relayUrl) => {
+                console.log(`REACTION FOUND for ${eventId.slice(0, 8)} from ${relayUrl}:`, reactionEvent);
+                
+                if (!reactions.find(r => r.id === reactionEvent.id)) {
+                    reactions.push(reactionEvent);
+                    console.log(`TOTAL REACTIONS for ${eventId.slice(0, 8)}: ${reactions.length}`);
+                    updateTestReactions(eventId, reactions);
+                }
+            });
+            
+            // Fallback timeout
+            setTimeout(() => {
+                if (reactions.length === 0) {
+                    console.log(`NO REACTIONS FOUND for ${eventId.slice(0, 8)} after timeout`);
+                    updateTestReactions(eventId, []);
+                }
+                relayManager.unsubscribe(subscriptionId);
+            }, 5000);
+        }
+        
+        function updateTestReactions(eventId, reactions) {
+            console.log(`UPDATING REACTIONS DISPLAY for ${eventId.slice(0, 8)}, count: ${reactions.length}`);
+            
+            const container = document.getElementById(`reactions-${eventId}`);
+            if (!container) {
+                console.log(`NO CONTAINER FOUND for reactions-${eventId}`);
+                return;
+            }
+            
+            if (reactions.length === 0) {
+                container.innerHTML = '<span class="reactions-loading">No reactions found</span>';
+                return;
+            }
+            
+            // Group by emoji
+            const groups = {};
+            reactions.forEach(r => {
+                const emoji = r.content || '👍';
+                if (!groups[emoji]) groups[emoji] = [];
+                groups[emoji].push(r);
+            });
+            
+            container.innerHTML = '';
+            Object.entries(groups).forEach(([emoji, list]) => {
+                const reactionDiv = document.createElement('div');
+                reactionDiv.className = 'reaction';
+                reactionDiv.innerHTML = `<span>${emoji}</span> <span>${list.length}</span>`;
+                container.appendChild(reactionDiv);
+            });
+            
+            console.log(`REACTIONS DISPLAY UPDATED for ${eventId.slice(0, 8)}`);
+        }
+    </script>
+</body>
+</html>
